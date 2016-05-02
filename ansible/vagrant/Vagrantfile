@@ -19,7 +19,7 @@ $coreos_image_version = "current"
 
 # Machines under VirtualBox provier use static IPs, based on VM index.
 # Master has index 0.
-VBOX_STATIC_IP_TEMPLATE = "172.32.128.1%d"
+VBOX_STATIC_IP_TEMPLATE = "172.32.128.2%d"
 
 VAGRANTFILE_API_VERSION = "2"
 
@@ -105,11 +105,26 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     config.vm.network "private_network", ip: VBOX_STATIC_IP_TEMPLATE % vm_idx
     vb.gui = false
     vb.memory = 2048
-    vb.cpus = 2
+    vb.cpus = 1
 
     # Use faster paravirtualized networking
     vb.customize ["modifyvm", :id, "--nictype1", "virtio"]
     vb.customize ["modifyvm", :id, "--nictype2", "virtio"]
+   
+    int = vm_idx + 1 
+    if int <= 15
+      hex = int.to_s(16)  
+      mac = "00000000000#{hex}"
+    else
+      hex = int.to_s(16)
+      mac = "0000000000#{hex}"
+    end 
+       
+    vb.customize ["modifyvm", :id, "--nic3", "intnet"]
+    vb.customize ["modifyvm", :id, "--nictype3", "virtio"]
+    vb.customize ["modifyvm", :id, "--intnet3", "prov"]
+    vb.customize ["modifyvm", :id, "--macaddress3", mac]
+    vb.customize ["modifyvm", :id, "--nicspeed3", 5000000]
   end
 
   def set_libvirt(lv, config)
@@ -146,7 +161,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     # Today this just creates /etc/hosts so machines can talk via their
     # 'internal' IPs instead of the openstack public ip.
     ansible.playbook = "./vagrant-ansible.yml"
-
     if provider == :virtualbox
       # On VirtualBox eth0 is used for NAT-ed internet connection,
       # and actual connectivity with the host and other VMs is done
@@ -160,7 +174,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
     # This sets up both flannel and kube.
     ansible.playbook = "../cluster.yml"
-
     if provider == :virtualbox
       master_ip = VBOX_STATIC_IP_TEMPLATE % 0
 
@@ -200,20 +213,20 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   nodes = Array.new()
   $num_nodes.times do |i|
     # multi vm config
-    name = "kube-node-#{i+1}"
+    name = "core-kube-node-#{i+1}"
     nodes.push(name)
     config.vm.define "#{name}" do |n|
       n.vm.hostname = name
       set_provider(n, i + 1)
-    end
+    end 
   end
 
   # This is how we create the ansible inventory, see it in .vagrant
   # if you want to debug, run 'VAGRANT_LOG=info vagrant up'
   # and you'll see exactly how the cluster comes up via ansible inv.
   $groups = {
-     "etcd" => ["kube-master"],
-     "masters" => ["kube-master"],
+     "etcd" => ["core-kube-master"],
+     "masters" => ["core-kube-master"],
      "nodes" => nodes,
      "all_groups:children" => ["etcd","masters","nodes"],
   }
@@ -223,11 +236,11 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     Vagrant.require_version ">= 1.8.0"
 
     # On CoreOS we use custom Python in Ansible.
-    $groups["all_groups:vars"] = ['ansible_python_interpreter="PATH=/opt/bin:$PATH python"']
+    $groups["all_groups:vars"] = ['ansible_python_interpreter="PATH=/opt/bin:$PATH python"', 'kube_download_url_base="http://10.10.10.10/releases/kubernetes/v{{ kube_version }}"', 'flannel_download_url_base="http://10.10.10.10/releases/flannel/v{{ flannel_version }}"', 'pypy_download_url_base="http://10.10.10.10/releases/pypy/v{{ pypy_version }}"']
   end
 
-  config.vm.define "kube-master" do |n|
-    name = "kube-master"
+  config.vm.define "core-kube-master" do |n|
+    name = "core-kube-master"
     n.vm.hostname = name
     set_provider(n, 0)
 
